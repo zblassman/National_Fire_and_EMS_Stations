@@ -58,6 +58,19 @@
     /* Body */
     .panel-body { padding: 12px; }
     .form-group { margin-bottom: 12px; }
+    .input-with-button {
+      display: flex; gap: 8px; align-items: stretch;
+    }
+    .input-with-button input {
+      flex: 1 1 auto; min-width: 0;
+    }
+    .input-with-button button {
+      flex: 0 0 auto; width: auto; min-width: 40px; padding: 10px 12px;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .input-with-button button svg {
+      display: block; width: 20px; height: 20px;
+    }
 
     input[type="text"], input[type="number"], button {
       width: 100%; padding: 10px; font-size: 16px; border-radius: 8px;
@@ -142,7 +155,12 @@
 
       <form id="routeForm">
         <div class="form-group">
-          <input type="text" id="start" placeholder="Start address or click map" />
+          <div class="input-with-button">
+            <input type="text" id="start" placeholder="Start address or click map" />
+            <button type="button" id="currentLocationBtn" title="Use current location">
+              <svg xmlns="http://www.w3.org/2000/svg" height="20px" viewBox="0 -960 960 960" width="20px" fill="#ffffff"><path d="M444-48v-98q-121-14-202.5-96T146-444H48v-72h98q14-120 95.5-202T444-814v-98h72v98q121 14 202.5 96T814-516h98v72h-98q-14 120-95.5 202T516-146v98h-72Zm36-168q110 0 187-77t77-187q0-110-77-187t-187-77q-110 0-187 77t-77 187q0 110 77 187t187 77Zm0-120q-60 0-102-42t-42-102q0-60 42-102t102-42q60 0 102 42t42 102q0 60-42 102t-102 42Zm0-65q32.59 0 55.79-23.21Q559-447.41 559-480t-23.21-55.79Q512.59-559 480-559t-55.79 23.21Q401-512.59 401-480t23.21 55.79Q447.41-401 480-401Zm1-80Z"/></svg>
+            </button>
+          </div>
         </div>
         <div class="form-group">
           <input type="text" id="end" placeholder="End address or click map" />
@@ -206,6 +224,7 @@
     const detourLayer = L.layerGroup().addTo(map);
     let startPoint = null, endPoint = null;
     let startMarker = null, endMarker = null;
+    let currentLocationMarker = null;
     let clickTarget = 'start';
     let allPOIs = [], currentWaypoints = [], lastBaseTime = 0;
 
@@ -219,6 +238,53 @@
     const addByNameBtn    = document.getElementById('addByNameBtn');
     const addByAddressBtn = document.getElementById('addByAddressBtn');
     const clearBtn = document.getElementById('clearBtn');
+    const currentLocationBtn = document.getElementById('currentLocationBtn');
+
+    // —— SET START TO CURRENT LOCATION ——
+    async function setStartToCurrentLocation(centerMap = true) {
+      if (!navigator.geolocation) {
+        alert('Geolocation is not supported by your browser');
+        return;
+      }
+      
+      try {
+        const position = await new Promise((resolve, reject) => {
+          navigator.geolocation.getCurrentPosition(resolve, reject);
+        });
+        
+        const lat = position.coords.latitude;
+        const lng = position.coords.longitude;
+        
+        // Create/update current location marker (displayed underneath)
+        if (currentLocationMarker) map.removeLayer(currentLocationMarker);
+        currentLocationMarker = L.circleMarker([lat, lng], {
+          radius: 8,
+          fillColor: '#3498db',
+          color: '#2980b9',
+          weight: 2,
+          opacity: 1,
+          fillOpacity: 0.6
+        }).bindPopup('Your Current Location').addTo(map);
+        
+        // Set start point and marker (displayed on top)
+        startPoint = [lng, lat];
+        if (startMarker) map.removeLayer(startMarker);
+        startMarker = L.marker([lat, lng]).bindPopup('Start (Your Location)').addTo(map);
+        startMarker.openPopup();
+        startInput.value = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+        clickTarget = 'end';
+        if (centerMap) {
+          map.setView([lat, lng], 8); // Center map on user's location
+        }
+      } catch (error) {
+        alert('Unable to get your location: ' + error.message);
+      }
+    }
+
+    // —— SET DEFAULT START TO CURRENT LOCATION ON LOAD ——
+    if (navigator.geolocation) {
+      setStartToCurrentLocation();
+    }
 
     // —— CLICK MAP TO SET START/END ——
     map.on('click', e => {
@@ -455,6 +521,7 @@
       detourLayer.clearLayers();
       if (startMarker) map.removeLayer(startMarker);
       if (endMarker)   map.removeLayer(endMarker);
+      if (currentLocationMarker) map.removeLayer(currentLocationMarker);
       startInput.value = '';
       endInput.value   = '';
       outputDiv.innerHTML = '';
@@ -482,6 +549,11 @@
       try { coords = await geocode(addr); } catch(e) { return alert('Geocode failed: ' + e.message); }
       const [lng, lat] = coords;
       await addWaypoint(lat, lng, addr);
+    });
+
+    // —— CURRENT LOCATION BUTTON ——
+    currentLocationBtn.addEventListener('click', async () => {
+      await setStartToCurrentLocation();
     });
 
     // —— FLOATING PANEL BEHAVIOR (drag + minimize) ——
