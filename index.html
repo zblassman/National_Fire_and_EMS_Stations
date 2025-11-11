@@ -127,6 +127,35 @@
       padding: 6px 8px;
     }
 
+    /* Selection menu popup */
+    .selection-menu {
+      text-align: center;
+      padding: 8px;
+    }
+    .selection-menu button {
+      width: 100%;
+      margin: 4px 0;
+      padding: 8px 16px;
+      font-size: 14px;
+      border-radius: 6px;
+      border: 1px solid #fffefe;
+      color: white;
+      cursor: pointer;
+      box-sizing: border-box;
+    }
+    .selection-menu .btn-start {
+      background-color: #27ae60;
+    }
+    .selection-menu .btn-start:hover {
+      background-color: #2ecc71;
+    }
+    .selection-menu .btn-end {
+      background-color: #e74c3c;
+    }
+    .selection-menu .btn-end:hover {
+      background-color: #c0392b;
+    }
+
     /* Mobile */
     @media (max-width: 768px) {
       #controls { width: 92vw; left: 4vw; right: 4vw; }
@@ -225,7 +254,7 @@
     let startPoint = null, endPoint = null;
     let startMarker = null, endMarker = null;
     let currentLocationMarker = null;
-    let clickTarget = 'start';
+    let selectionPopup = null;
     let allPOIs = [], currentWaypoints = [], lastBaseTime = 0;
 
     // —— DOM REFS ——
@@ -239,6 +268,35 @@
     const addByAddressBtn = document.getElementById('addByAddressBtn');
     const clearBtn = document.getElementById('clearBtn');
     const currentLocationBtn = document.getElementById('currentLocationBtn');
+
+    // —— CREATE COLORED MARKER ICONS ——
+    function createGreenIcon() {
+      return L.icon({
+        iconUrl: 'data:image/svg+xml;base64,' + btoa(`
+          <svg xmlns="http://www.w3.org/2000/svg" width="25" height="41" viewBox="0 0 25 41">
+            <path fill="#27ae60" stroke="#fff" stroke-width="1.5" d="M12.5 0C5.6 0 0 5.6 0 12.5c0 8.5 12.5 28.5 12.5 28.5S25 21 25 12.5C25 5.6 19.4 0 12.5 0z"/>
+            <circle cx="12.5" cy="12.5" r="5" fill="#fff"/>
+          </svg>
+        `),
+        iconSize: [25, 41],
+        iconAnchor: [12, 41],
+        popupAnchor: [0, -41]
+      });
+    }
+
+    function createRedIcon() {
+      return L.icon({
+        iconUrl: 'data:image/svg+xml;base64,' + btoa(`
+          <svg xmlns="http://www.w3.org/2000/svg" width="25" height="41" viewBox="0 0 25 41">
+            <path fill="#e74c3c" stroke="#fff" stroke-width="1.5" d="M12.5 0C5.6 0 0 5.6 0 12.5c0 8.5 12.5 28.5 12.5 28.5S25 21 25 12.5C25 5.6 19.4 0 12.5 0z"/>
+            <circle cx="12.5" cy="12.5" r="5" fill="#fff"/>
+          </svg>
+        `),
+        iconSize: [25, 41],
+        iconAnchor: [12, 41],
+        popupAnchor: [0, -41]
+      });
+    }
 
     // —— SET START TO CURRENT LOCATION ——
     async function setStartToCurrentLocation(centerMap = true) {
@@ -269,10 +327,9 @@
         // Set start point and marker (displayed on top)
         startPoint = [lng, lat];
         if (startMarker) map.removeLayer(startMarker);
-        startMarker = L.marker([lat, lng]).bindPopup('Start (Your Location)').addTo(map);
+        startMarker = L.marker([lat, lng], { icon: createGreenIcon() }).bindPopup('Start (Your Location)').addTo(map);
         startMarker.openPopup();
         startInput.value = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
-        clickTarget = 'end';
         if (centerMap) {
           map.setView([lat, lng], 8); // Center map on user's location
         }
@@ -287,20 +344,76 @@
     }
 
     // —— CLICK MAP TO SET START/END ——
+    function setStartPoint(lat, lng) {
+      if (startMarker) map.removeLayer(startMarker);
+      startMarker = L.marker([lat, lng], { icon: createGreenIcon() }).bindPopup('Start').addTo(map).openPopup();
+      startPoint = [lng, lat];
+      startInput.value = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+    }
+
+    function setEndPoint(lat, lng) {
+      if (endMarker) map.removeLayer(endMarker);
+      endMarker = L.marker([lat, lng], { icon: createRedIcon() }).bindPopup('End').addTo(map).openPopup();
+      endPoint = [lng, lat];
+      endInput.value = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+    }
+
     map.on('click', e => {
       const { lat, lng } = e.latlng;
-      if (clickTarget === 'start') {
-        if (startMarker) map.removeLayer(startMarker);
-        startMarker = L.marker([lat, lng]).bindPopup('Start').addTo(map).openPopup();
-        startPoint = [lng, lat];
-        startInput.value = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
-      } else {
-        if (endMarker) map.removeLayer(endMarker);
-        endMarker = L.marker([lat, lng]).bindPopup('End').addTo(map).openPopup();
-        endPoint = [lng, lat];
-        endInput.value = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+      const clickedElement = e.originalEvent?.target;
+      
+      // Don't handle clicks on popups or markers
+      if (clickedElement?.closest('.leaflet-popup') || clickedElement?.closest('.leaflet-marker-icon')) {
+        return;
       }
-      clickTarget = clickTarget === 'start' ? 'end' : 'start';
+      
+      // If popup exists, close it (user clicked outside)
+      if (selectionPopup) {
+        map.removeLayer(selectionPopup);
+        selectionPopup = null;
+        return;
+      }
+      
+      // Create selection menu
+      const menuContent = document.createElement('div');
+      menuContent.className = 'selection-menu';
+      
+      const startBtn = document.createElement('button');
+      startBtn.className = 'btn-start';
+      startBtn.textContent = 'Set as Start';
+      startBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        setStartPoint(lat, lng);
+        if (selectionPopup) {
+          map.removeLayer(selectionPopup);
+          selectionPopup = null;
+        }
+      });
+      
+      const endBtn = document.createElement('button');
+      endBtn.className = 'btn-end';
+      endBtn.textContent = 'Set as End';
+      endBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        setEndPoint(lat, lng);
+        if (selectionPopup) {
+          map.removeLayer(selectionPopup);
+          selectionPopup = null;
+        }
+      });
+      
+      menuContent.appendChild(startBtn);
+      menuContent.appendChild(endBtn);
+      
+      // Create popup at click location
+      selectionPopup = L.popup({ 
+        closeOnClick: false, 
+        closeButton: true,
+        autoClose: false 
+      })
+        .setLatLng([lat, lng])
+        .setContent(menuContent)
+        .openOn(map);
     });
 
     // —— LOAD POIs ——
@@ -522,6 +635,8 @@
       if (startMarker) map.removeLayer(startMarker);
       if (endMarker)   map.removeLayer(endMarker);
       if (currentLocationMarker) map.removeLayer(currentLocationMarker);
+      if (selectionPopup) map.removeLayer(selectionPopup);
+      selectionPopup = null;
       startInput.value = '';
       endInput.value   = '';
       outputDiv.innerHTML = '';
